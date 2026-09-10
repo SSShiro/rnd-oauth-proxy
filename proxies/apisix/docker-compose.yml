@@ -1,0 +1,26 @@
+# Apache APISIX + плагин openid-connect перед nginx-hello, standalone-режим
+# (без etcd — маршруты читаются из локального apisix.yaml).
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/apisix/docker-compose.yml up -d
+#
+# Проверка: http://localhost:4188/ -> редирект на Keycloak login ->
+#   testuser / Test12345! -> редирект обратно, виден Hello World.
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  apisix:
+    image: apache/apisix:3.18.0-debian
+    container_name: apisix
+    volumes:
+      - ./config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    ports:
+      - "4188:9080"
+    networks:
+      - oauth-net
+    restart: unless-stopped

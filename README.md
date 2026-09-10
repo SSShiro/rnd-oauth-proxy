@@ -26,6 +26,8 @@ proxies/
   traefik/                     # Traefik + ForwardAuth + oauth2-proxy (порт 4184)
   nginx-openresty/             # OpenResty + lua-resty-openidc (порт 4185)
   haproxy/                     # HAProxy + Lua auth-request + oauth2-proxy (порт 4186)
+  pomerium/                     # Pomerium identity-aware proxy (порт 4187, TLS)
+  apisix/                       # Apache APISIX + плагин openid-connect (порт 4188)
 docs/oauth-proxy-rnd.md               # итоговый отчёт (Markdown)
 docs/oauth-proxy-rnd-confluence.txt   # тот же отчёт для импорта в Confluence
 ```
@@ -58,10 +60,20 @@ Realm: `corp-sso`. Тестовые пользователи: `testuser`/`Test12
 | Traefik + ForwardAuth + oauth2-proxy | http://localhost:4184/ | traefik, oauth2-proxy-traefik |
 | Nginx/OpenResty + lua-resty-openidc | http://localhost:4185/ | nginx-openresty |
 | HAProxy + Lua auth-request + oauth2-proxy | http://localhost:4186/ | haproxy-oauth-rnd, oauth2-proxy-haproxy |
+| Pomerium (identity-aware proxy) | https://hello.localhost:4187/ (самоподписанный TLS, `curl -k`) | pomerium |
+| Apache APISIX + плагин openid-connect | http://localhost:4188/ | apisix |
 
-Все 7 сценариев подняты и проверены end-to-end (полный Authorization Code
+Все 9 сценариев подняты и проверены end-to-end (полный Authorization Code
 flow: редирект на Keycloak → логин → редирект обратно → 200 с содержимым
 `nginx-hello`) в рамках этого RND.
+
+Pomerium — единственное решение в стенде, работающее строго по HTTPS: его
+CSRF-cookie всегда ставится с флагом `Secure` (без конфигурационного override),
+поэтому по чистому HTTP callback распадается с `invalid CSRF token`. В реальном
+браузере это не проблема (у `*.localhost` есть secure-context исключение), но
+для честного end-to-end теста curl'ом в стенде используется самоподписанный
+сертификат `proxies/pomerium/certs/` — используйте `curl -k` или добавьте
+сертификат в доверенные локально.
 
 ## Важные нюансы стенда
 

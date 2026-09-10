@@ -1,0 +1,32 @@
+# Pomerium перед nginx-hello, аутентификация через Keycloak (realm corp-sso).
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/pomerium/docker-compose.yml up -d
+#
+# Проверка: https://hello.localhost:4187/ (сертификат самоподписанный,
+#   curl -k / браузер с игнорированием предупреждения) -> редирект на
+#   Keycloak login -> testuser / Test12345! -> редирект обратно, виден
+#   Hello World. ("hello.localhost" и "authenticate.localhost" резолвятся
+#   в 127.0.0.1 автоматически, правка /etc/hosts не требуется.)
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  pomerium:
+    image: pomerium/pomerium:v0.33.3
+    container_name: pomerium
+    volumes:
+      - ./config.yaml:/pomerium/config.yaml:ro
+      - ./certs:/pomerium/certs:ro
+      - pomerium-data:/pomerium/data
+    ports:
+      - "4187:4187"
+    networks:
+      - oauth-net
+    restart: unless-stopped
+
+volumes:
+  pomerium-data:

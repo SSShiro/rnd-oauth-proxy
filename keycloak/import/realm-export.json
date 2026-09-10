@@ -166,6 +166,42 @@
         { "name": "email", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": { "userinfo.token.claim": "true", "user.attribute": "email", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "email", "jsonType.label": "String" } },
         { "name": "realm-roles", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-realm-role-mapper", "config": { "multivalued": "true", "userinfo.token.claim": "true", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "roles", "jsonType.label": "String" } }
       ]
+    },
+    {
+      "clientId": "pomerium-client",
+      "name": "pomerium",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "pomerium-secret-CHANGEME",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["https://authenticate.localhost:4187/oauth2/callback"],
+      "webOrigins": ["https://authenticate.localhost:4187"],
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        { "name": "username", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": { "userinfo.token.claim": "true", "user.attribute": "username", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "preferred_username", "jsonType.label": "String" } },
+        { "name": "email", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": { "userinfo.token.claim": "true", "user.attribute": "email", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "email", "jsonType.label": "String" } },
+        { "name": "realm-roles", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-realm-role-mapper", "config": { "multivalued": "true", "userinfo.token.claim": "true", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "roles", "jsonType.label": "String" } }
+      ]
+    },
+    {
+      "clientId": "apisix-client",
+      "name": "apisix-openid-connect-plugin",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "apisix-secret-CHANGEME",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:4188/callback"],
+      "webOrigins": ["http://localhost:4188"],
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        { "name": "username", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": { "userinfo.token.claim": "true", "user.attribute": "username", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "preferred_username", "jsonType.label": "String" } },
+        { "name": "email", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "config": { "userinfo.token.claim": "true", "user.attribute": "email", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "email", "jsonType.label": "String" } },
+        { "name": "realm-roles", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-realm-role-mapper", "config": { "multivalued": "true", "userinfo.token.claim": "true", "id.token.claim": "true", "access.token.claim": "true", "claim.name": "roles", "jsonType.label": "String" } }
+      ]
     }
   ]
 }

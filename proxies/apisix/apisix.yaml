@@ -1,0 +1,30 @@
+# Декларативные маршруты APISIX (standalone-режим, без etcd).
+# Плагин openid-connect (open-source, в отличие от аналогичного платного
+# плагина Kong Enterprise) ведёт полный Authorization Code Flow с Keycloak.
+routes:
+  - id: hello-oidc
+    uri: /*
+    upstream_id: nginx-hello
+    plugins:
+      openid-connect:
+        client_id: apisix-client
+        client_secret: apisix-secret-CHANGEME
+        discovery: http://keycloak:8080/realms/corp-sso/.well-known/openid-configuration
+        # redirect_uri обязан быть подпутём защищаемого uri ("/*" покрывает и его).
+        redirect_uri: http://localhost:4188/callback
+        scope: openid email profile
+        ssl_verify: false
+        set_access_token_header: true
+        set_id_token_header: true
+        set_userinfo_header: true
+        session:
+          # >= 16 символов, требование плагина.
+          secret: apisix-session-secret-min16chars-CHANGEME
+
+upstreams:
+  - id: nginx-hello
+    type: roundrobin
+    nodes:
+      "nginx-hello:80": 1
+
+#END

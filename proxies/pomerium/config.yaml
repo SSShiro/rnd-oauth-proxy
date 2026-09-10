@@ -1,0 +1,53 @@
+# Pomerium (self-hosted "Core"), аутентификация через Keycloak (realm corp-sso).
+#
+# Архитектурная особенность Pomerium (в отличие от oauth2-proxy/gogatekeeper):
+# отдельный "authenticate" hostname, общий для ВСЕХ защищаемых приложений —
+# именно на него регистрируется redirect_uri у Keycloak, а не на hostname
+# конкретного приложения. Здесь используется "authenticate.localhost" —
+# поддомены *.localhost резолвятся в 127.0.0.1 автоматически (RFC 6761),
+# без правки /etc/hosts. Всё крутится на одном порту 4187 — маршрутизация
+# между route'ами идёт по Host-заголовку, не по порту.
+#
+# TLS вместо insecure_server: CSRF/PKCE-cookie у Pomerium всегда ставится
+# с флагом Secure (жёстко в коде authenticate/csrf.go, без конфигурационного
+# override) — по чистому HTTP callback гарантированно падает с
+# "invalid CSRF token". В реальном браузере это работает и без валидного TLS
+# для *.localhost благодаря "secure context"-исключению для localhost
+# в спецификации (https://w3c.github.io/webappsec-secure-contexts/), но
+# curl/скрипты этого исключения не знают — поэтому для честного end-to-end
+# теста здесь используется самоподписанный сертификат (certs/tls.crt,key)
+# и curl -k, а не insecure_server.
+address: ":4187"
+certificate_file: /pomerium/certs/tls.crt
+certificate_key_file: /pomerium/certs/tls.key
+
+authenticate_service_url: https://authenticate.localhost:4187
+
+shared_secret: "yyOGlq8+yJjcPkpEGBCfZ43vDdd5f+Ic8F05+X9NENg="
+cookie_secret: "3QUQgeiKkZi6Mnhydy2N3YCosfxNuV0UAN5ObUxDZEY="
+
+# Файловое хранилище databroker (сессии/состояние) — без внешней БД/Redis,
+# годится только для одного инстанса (RND). В проде — Postgres/Redis backend.
+databroker_storage_type: file
+databroker_storage_connection_string: file:///pomerium/data/databroker
+
+idp_provider: oidc
+idp_provider_url: http://keycloak:8080/realms/corp-sso
+idp_client_id: pomerium-client
+idp_client_secret: pomerium-secret-CHANGEME
+idp_scopes:
+  - openid
+  - email
+  - profile
+
+routes:
+  - from: https://hello.localhost:4187
+    to: http://nginx-hello:80
+    pass_identity_headers: true
+    policy:
+      - allow:
+          or:
+            # Грубая авторизация по домену email — для сравнения с
+            # allowed-groups/allowed-emails у oauth2-proxy/vouch-proxy.
+            - domain:
+                is: corp.local

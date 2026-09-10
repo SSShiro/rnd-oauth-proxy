@@ -107,6 +107,8 @@ Party (нет встроенной поддержки OpenID Connect / SAML). Т
 | **NGINX Plus native OIDC (R34+)** | (4), коммерч. | Активно развивается вендором (F5); RBAC и logout добавлены в R35/R36 | Да | Да | `auth_require` по `$oidc_claim_*` (с R35) | Encrypted cookie + `zone_sync` | Нет | Низкая (для тех, кто уже на NGINX Plus) |
 | **HAProxy + Lua auth-request + oauth2-proxy** | (2) | Нет единого канонического решения; разрозненные community-скрипты | Да (через oauth2-proxy) | Да | Как у oauth2-proxy + HAProxy ACL | Как у oauth2-proxy | Да | Высокая (нет готового пакета, ручная сборка Lua-зависимостей) |
 | **HAProxy Enterprise OIDC/SSO module** | (4), коммерч. | Активно развивается вендором (HAProxy Technologies) | Да | Да | Не задокументировано "из коробки" | Cookie с ротацией секрета | Нет | Низкая (для тех, кто уже на HAProxy Enterprise) |
+| **Pomerium** | (1) | Активно, Apache-2.0, ~5k звёзд | Да | Да | Context-aware policy-движок (email/domain/claim, устройство, IP) | Cookie + файловый/внешний databroker | Нет | Средняя (отдельный "authenticate" hostname; обязателен TLS) |
+| **Apache APISIX + openid-connect** | (1)/(2) | Активно, Apache Top-Level Project | Да | Да | Как у lua-resty-openidc (через плагин) | Cookie (session plugin) | Нет (standalone) | Низкая-средняя (managed-плагин, без etcd в standalone-режиме) |
 
 ## 5. Детальный разбор решений
 
@@ -385,6 +387,82 @@ RBAC/claims-enforcement "из коробки" в публичной докуме
 разворачивался в этом RND** (требует лицензии), приведён для полноты
 сравнения.
 
+### 5.8. Pomerium
+
+Identity-aware proxy того же класса, что oauth2-proxy/gogatekeeper, но с
+заметно более сильным встроенным policy-движком: авторизация может
+учитывать не только identity (email/domain/claim), но и контекст запроса.
+Добавлен в RND по итогам отдельного исследования дополнительных
+кандидатов — закрывает слабое место oauth2-proxy по multi-app/multi-domain
+конфигурации с одного инстанса.
+
+**Плюсы:**
+- Активная разработка (Apache-2.0, ~5k звёзд, 4500+ коммитов), есть и
+  self-hosted "Core", и managed control-plane (Pomerium Zero/Enterprise).
+- Официальный гайд интеграции именно с Keycloak как generic OIDC-провайдером.
+- Единый `idp_provider_url` (issuer) и для discovery, и для backend-вызовов
+  — структурно защищён от hostname-рассинхронизации, как у
+  oauth2-proxy/gogatekeeper.
+
+**Минусы:**
+- Архитектурная особенность: отдельный "authenticate" hostname, общий для
+  *всех* защищаемых приложений — именно на него регистрируется redirect_uri
+  у Keycloak, а не на hostname конкретного приложения. Требует продуманной
+  DNS-схемы (в проде — реальный поддомен вида
+  `authenticate.corp.example.com`).
+- CSRF/PKCE/authenticate-cookie у Pomerium **всегда** ставятся с флагом
+  `Secure`, без конфигурационного override — по чистому HTTP callback
+  гарантированно падает с `invalid CSRF token`. TLS обязателен фактически
+  с первого дня, даже для локальной разработки.
+
+**Проверено в RND:** полный login-flow подтверждён через HTTPS с
+самоподписанным сертификатом (`curl -k`) — обычный `insecure_server: true`
+(без TLS) не сработал именно из-за жёстко закреплённого `Secure`-флага на
+CSRF-cookie (Secure-cookie отправляется по чистому HTTP только браузерами,
+благодаря secure-context исключению для `*.localhost`, но не curl/скриптами
+— важный нюанс для автоматизированного тестирования и синтетического
+мониторинга такой связки). Заголовки identity (`X-Pomerium-Claim-*`)
+задокументированы и включены через `pass_identity_headers: true`, но
+независимо переподтвердить их на upstream в RND не удалось: фронтовой Envoy
+у Pomerium фильтрует произвольные response-заголовки, которыми в этом
+стенде обычно подсвечивался факт получения identity апстримом.
+Конфигурация: [`proxies/pomerium/`](../proxies/pomerium/).
+
+### 5.9. Apache APISIX + плагин openid-connect
+
+API-шлюз с полностью open-source плагином `openid-connect` (в отличие от
+аналогичного плагина в Kong Gateway — там только Enterprise-tier). Построен
+поверх lua-resty-openidc, но упакован как managed-плагин с собственной
+конфигурацией вместо самостоятельного написания Lua. Добавлен в RND как
+кандидат для сценариев, где нужен не только веб-прокси, но и полноценный
+API-шлюз.
+
+**Плюсы:**
+- Полностью open-source, в отличие от Kong.
+- Apache Top-Level Project с 2020 года, очень активен (релизы каждые ~2
+  месяца).
+- **Standalone-режим** (`config_provider: yaml`) позволяет обойтись вообще
+  без etcd — маршруты читаются из локального `apisix.yaml`, что заметно
+  снижает операционную сложность по сравнению с классическим APISIX+etcd
+  развёртыванием. Хорошая находка для этого RND.
+- Официальный пример интеграции именно с Keycloak в документации.
+
+**Минусы:**
+- `discovery` в конфиге плагина — это полный URL
+  `.well-known/openid-configuration`, а не просто issuer, как у части
+  других решений — легко ошибиться при переносе конфигурации между
+  решениями.
+- В классическом (не standalone) режиме требует etcd как обязательную
+  зависимость — лишний компонент в эксплуатации.
+- Отдельный от "чистого" nginx/OpenResty инструмент, дополнительная
+  экосистема (Admin API, отдельные термины route/upstream/plugin) для
+  команды, которая уже умеет в ванильный nginx.
+
+**Проверено в RND:** полный login-flow подтверждён с первой попытки;
+заголовок `X-Userinfo` (base64-encoded JSON с
+`email`/`roles`/`preferred_username`) подтверждённо доходит до апстрима.
+Конфигурация: [`proxies/apisix/`](../proxies/apisix/).
+
 ## 6. Типовые грабли внедрения (обнаружены практически в рамках RND)
 
 > ⚠️ **Расхождение hostname Keycloak между браузером и backend.** Если
@@ -428,6 +506,18 @@ RBAC/claims-enforcement "из коробки" в публичной докуме
 > версия зависимости. Аналогичный риск справедлив для любых кастомных
 > Lua-сборок (HAProxy, OpenResty).
 
+> ⚠️ **Pomerium: CSRF-cookie всегда Secure, TLS обязателен даже для dev.**
+> В отличие от oauth2-proxy/gogatekeeper/vouch-proxy, у Pomerium нет опции
+> "отключить Secure-флаг на cookie для локальной разработки" — флаг
+> захардкожен в коде CSRF-мидлвари. `insecure_server: true` отключает TLS
+> на листенере, но НЕ помогает: callback гарантированно падает с "invalid
+> CSRF token", т.к. Secure-cookie не будет отправлен обратно по чистому
+> HTTP. В браузере это работает без валидного сертификата благодаря
+> secure-context исключению для `*.localhost`, но синтетические
+> проверки/health-checks скриптами (curl, CI) должны либо ходить по
+> настоящему HTTPS (можно с самоподписанным сертификатом), либо
+> тестировать через реальный браузерный движок.
+
 ## 7. Рекомендации
 
 ### 7.1. Выбор решения
@@ -458,6 +548,16 @@ RBAC/claims-enforcement "из коробки" в публичной докуме
    внедрений, если нет уже существующей экспертизы OpenResty/Kong/APISIX в
    команде: темп поддержки библиотеки замедлился, риск bus factor,
    требуется Lua-экспертиза для сопровождения.
+7. **Нужна гранулярная context-aware авторизация и/или много разнородных
+   приложений с одного инстанса** — рассмотреть **Pomerium** как
+   альтернативу основной рекомендации: более сильный policy-движок, чем у
+   oauth2-proxy, ценой обязательного TLS и отдельного "authenticate"
+   hostname на все приложения.
+8. **Если компании нужен не только auth-proxy, но и полноценный API-шлюз**
+   (микросервисы, множество upstream'ов, rate-limiting и т.п.) —
+   рассмотреть **Apache APISIX + openid-connect** в standalone-режиме (без
+   etcd): закрывает и OIDC-аутентификацию, и типовые задачи API-gateway
+   одним инструментом.
 
 ### 7.2. Развёртывание
 
@@ -516,6 +616,8 @@ RBAC/claims-enforcement "из коробки" в публичной докуме
 | [`proxies/traefik/`](../proxies/traefik/) | Traefik + ForwardAuth + oauth2-proxy |
 | [`proxies/nginx-openresty/`](../proxies/nginx-openresty/) | OpenResty + lua-resty-openidc |
 | [`proxies/haproxy/`](../proxies/haproxy/) | HAProxy + Lua auth-request + oauth2-proxy |
+| [`proxies/pomerium/`](../proxies/pomerium/) | Pomerium (identity-aware proxy, TLS) |
+| [`proxies/apisix/`](../proxies/apisix/) | Apache APISIX + плагин openid-connect |
 
-Все 7 сценариев проверены end-to-end полным сценарием логина через
+Все 9 сценариев проверены end-to-end полным сценарием логина через
 тестового пользователя `testuser`/`Test12345!` realm'а `corp-sso`.
