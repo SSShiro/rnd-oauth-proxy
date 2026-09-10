@@ -11,6 +11,10 @@
 - **[docs/oauth-proxy-rnd-confluence.txt](docs/oauth-proxy-rnd-confluence.txt)** —
   тот же отчёт в формате Confluence Wiki Markup, для импорта через
   Confluence → Space Tools → Content Tools → Import → Confluence Wiki Markup files.
+- **[docs/oauth-proxy-testing-guide.md](docs/oauth-proxy-testing-guide.md)** —
+  подробная пошаговая инструкция: как поднять каждое решение по отдельности,
+  как именно в нём реализована авторизация, и как самостоятельно проверить
+  результат (вручную и автоматически через `scripts/test-oidc-login.sh`).
 
 ## Структура
 
