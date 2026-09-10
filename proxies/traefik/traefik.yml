@@ -1,0 +1,18 @@
+# Статическая конфигурация Traefik.
+entryPoints:
+  web:
+    address: ":80"
+
+api:
+  dashboard: true
+  insecure: true   # только для RND-стенда, в проде выключить/закрыть auth
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+log:
+  level: INFO
+
+accessLog: {}

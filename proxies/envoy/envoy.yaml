@@ -1,0 +1,108 @@
+# Демонстрация нативного OAuth2-фильтра Envoy (envoy.filters.http.oauth2),
+# в отличие от oauth2-proxy/gogatekeeper здесь НЕТ отдельного auth-сервиса —
+# вся OIDC-логика (redirect, обмен кода на токен, cookie) исполняется внутри
+# процесса Envoy как HTTP-фильтр в filter chain.
+#
+# ВАЖНО: у фильтра нет OIDC discovery — authorization_endpoint и token_endpoint
+# заданы вручную по данным keycloak /realms/corp-sso/.well-known/openid-configuration.
+# authorization_endpoint отдаётся браузеру как Location для редиректа, поэтому
+# используется хост "keycloak", который должен резолвиться и с хост-машины
+# (для теста добавлена запись "127.0.0.1 keycloak" в /etc/hosts) — в реальном
+# окружении это будет публичный DNS-адрес корпоративного Keycloak.
+# token_endpoint вызывается самим Envoy изнутри docker-сети oauth-net,
+# поэтому там разрешение имени "keycloak" работает по умолчанию.
+
+node:
+  id: envoy-rnd
+  cluster: envoy-rnd-cluster
+
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 10000 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: hello_app
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: nginx_hello }
+          http_filters:
+          - name: envoy.filters.http.oauth2
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+              config:
+                token_endpoint:
+                  cluster: keycloak
+                  uri: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/token
+                  timeout: 5s
+                authorization_endpoint: "http://keycloak:8080/realms/corp-sso/protocol/openid-connect/auth"
+                redirect_uri: "http://localhost:4183/callback"
+                redirect_path_matcher:
+                  path:
+                    exact: /callback
+                signout_path:
+                  path:
+                    exact: /signout
+                credentials:
+                  client_id: envoy-client
+                  token_secret:
+                    name: token
+                    sds_config:
+                      resource_api_version: V3
+                      path_config_source:
+                        path: /etc/envoy/token-secret.yaml
+                  hmac_secret:
+                    name: hmac
+                    sds_config:
+                      resource_api_version: V3
+                      path_config_source:
+                        path: /etc/envoy/hmac-secret.yaml
+                auth_scopes: ["openid", "email", "profile"]
+                # Пробрасываем access_token апстриму, чтобы backend видел,
+                # что запрос аутентифицирован (Authorization: Bearer ...).
+                forward_bearer_token: true
+                # cookie без Secure-флага — только для http:// RND-стенда.
+                cookie_configs:
+                  bearer_token_cookie_config:
+                    same_site: LAX
+                  oauth_hmac_cookie_config:
+                    same_site: LAX
+                  oauth_expires_cookie_config:
+                    same_site: LAX
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+  - name: keycloak
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: keycloak
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: keycloak, port_value: 8080 }
+  - name: nginx_hello
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: nginx_hello
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: nginx-hello, port_value: 80 }
+
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }

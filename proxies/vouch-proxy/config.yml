@@ -1,0 +1,38 @@
+# Конфигурация vouch-proxy. Сам vouch-proxy НЕ является reverse-proxy
+# к приложению — это отдельный validate/auth сервис для связки с
+# nginx auth_request (см. nginx.conf рядом). Паттерн идентичен
+# nginx+oauth2-proxy, только вместо oauth2-proxy используется vouch-proxy.
+vouch:
+  listen: 0.0.0.0
+  port: 9090
+  # Пускаем любого, кто успешно аутентифицировался в Keycloak (RND-стенд),
+  # ограничение домена cookie обязательно при allowAllUsers: true.
+  allowAllUsers: true
+  cookie:
+    secure: false
+    domain: localhost
+  jwt:
+    # >= 44 символа (256 бит в base64), иначе vouch-proxy откажется стартовать.
+    secret: "RByFjMUP9n_kT3sjVx7TK9dYrkwxY8vzRWYYOP4O_O4="
+
+oauth:
+  provider: oidc
+  client_id: vouch-proxy-client
+  client_secret: vouch-proxy-secret-CHANGEME
+  # ВАЖНО: Keycloak привязывает claim "iss" в токене к хосту, с которого
+  # браузер инициировал /auth, а НЕ к хосту, с которого потом вызывается /token.
+  # Поэтому auth_url/token_url/user_info_url обязаны использовать ОДИН И ТОТ ЖЕ
+  # хост "keycloak:8080" (иначе userinfo вернёт 401/пустое тело из-за
+  # рассинхронизации iss). Для доступа браузера/curl с хоста к "keycloak:8080"
+  # на этой машине добавлена запись в /etc/hosts: "127.0.0.1 keycloak".
+  # В проде это решается через единое публичное DNS-имя Keycloak,
+  # резолвящееся одинаково и для браузеров, и для бэкенда.
+  auth_url: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/auth
+  token_url: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/token
+  user_info_url: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/userinfo
+  scopes:
+    - openid
+    - email
+    - profile
+  # Публично видимый (браузеру) callback — проксируется front-nginx-ом на порт 4182.
+  callback_url: http://localhost:4182/auth

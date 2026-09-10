@@ -1,0 +1,50 @@
+# Динамическая конфигурация: роутинг + ForwardAuth к oauth2-proxy-traefik.
+#
+# Паттерн (Traefik OSS не имеет нативного OIDC middleware — это функция
+# только Traefik Hub): forwardAuth шлёт auth-subrequest на КОРЕНЬ
+# oauth2-proxy (не на /oauth2/auth!). oauth2-proxy запущен с
+# --upstream=static://202, поэтому при валидной сессии отдаёт 202
+# (Traefik пропускает запрос и копирует authResponseHeaders), а при
+# отсутствии сессии сам отдаёт 302 на Keycloak — Traefik ретранслирует
+# этот редирект клиенту как есть (forwardAuth форвардит non-2xx ответ
+# auth-сервиса целиком, включая статус и Location).
+# Внимание: НЕ использовать /oauth2/auth — тот endpoint предназначен
+# для nginx auth_request и намеренно возвращает голый 401 без Location.
+http:
+  routers:
+    oauth2-callback:
+      rule: "PathPrefix(`/oauth2/`)"
+      entryPoints: ["web"]
+      service: oauth2-proxy-traefik
+      priority: 100
+
+    hello-app:
+      rule: "PathPrefix(`/`)"
+      entryPoints: ["web"]
+      service: nginx-hello
+      priority: 1
+      middlewares:
+        - "oauth2-auth"
+
+  middlewares:
+    oauth2-auth:
+      forwardAuth:
+        address: "http://oauth2-proxy-traefik:4180/"
+        trustForwardHeader: true
+        authResponseHeaders:
+          - "X-Auth-Request-User"
+          - "X-Auth-Request-Email"
+          - "X-Auth-Request-Preferred-Username"
+          - "X-Auth-Request-Access-Token"
+          - "Authorization"
+
+  services:
+    nginx-hello:
+      loadBalancer:
+        servers:
+          - url: "http://nginx-hello:80"
+
+    oauth2-proxy-traefik:
+      loadBalancer:
+        servers:
+          - url: "http://oauth2-proxy-traefik:4180"

@@ -1,0 +1,55 @@
+# Traefik OSS + ForwardAuth middleware -> oauth2-proxy -> Keycloak (realm corp-sso).
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/traefik/docker-compose.yml up -d
+#
+# Проверка: http://localhost:4184/  -> forwardAuth 401 -> errors middleware
+#   -> редирект на /oauth2/start -> Keycloak login -> testuser / Test12345!
+#   -> редирект обратно -> Hello World.
+# Dashboard (RND-only, --api.insecure): http://localhost:8082/dashboard/
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  traefik:
+    image: traefik:v3.7
+    container_name: traefik
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
+    ports:
+      - "4184:80"
+      - "8082:8080"
+    networks:
+      - oauth-net
+    restart: unless-stopped
+
+  oauth2-proxy-traefik:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    container_name: oauth2-proxy-traefik
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=http://keycloak:8080/realms/corp-sso
+      - --client-id=traefik-client
+      - --client-secret=traefik-secret-CHANGEME
+      - --redirect-url=http://localhost:4184/oauth2/callback
+      # forward-auth режим: у oauth2-proxy нет реального upstream,
+      # он используется только как auth-сервис для Traefik forwardAuth.
+      - --upstream=static://202
+      - --reverse-proxy=true
+      - --email-domain=*
+      - --cookie-secret=kmAjeqdv-Ip4MHBiVG3NZ0aVcKavc6lyP0bdPjsATis=
+      - --cookie-secure=false
+      - --set-xauthrequest=true
+      - --pass-access-token=true
+      - --skip-provider-button=true
+      - --insecure-oidc-allow-unverified-email=true
+      - --silence-ping-logging=true
+    # Порт наружу не публикуется: доступ только через Traefik.
+    networks:
+      - oauth-net
+    restart: unless-stopped

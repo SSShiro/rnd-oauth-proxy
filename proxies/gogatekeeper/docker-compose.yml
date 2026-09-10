@@ -1,0 +1,25 @@
+# gogatekeeper перед nginx-hello, аутентификация через Keycloak (realm corp-sso).
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/gogatekeeper/docker-compose.yml up -d
+#
+# Проверка: http://localhost:4181/ -> редирект на Keycloak login ->
+#   testuser / Test12345! -> редирект обратно, виден Hello World.
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  gogatekeeper:
+    image: quay.io/gogatekeeper/gatekeeper:4.11.0
+    container_name: gogatekeeper
+    command: ["--config=/etc/gatekeeper/config.yml"]
+    volumes:
+      - ./config.yml:/etc/gatekeeper/config.yml:ro
+    ports:
+      - "4181:4181"
+    networks:
+      - oauth-net
+    restart: unless-stopped

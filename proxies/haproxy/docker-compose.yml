@@ -1,0 +1,51 @@
+# HAProxy перед nginx-hello, аутентификация через отдельный инстанс
+# oauth2-proxy по паттерну "auth-request" (Lua-скрипт TimWolla/haproxy-auth-request).
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/haproxy/docker-compose.yml up -d --build
+#
+# Проверка: http://localhost:4186/ -> редирект на /oauth2/start -> Keycloak
+#   login -> testuser / Test12345! -> Hello World.
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  haproxy-oauth-rnd:
+    build: .
+    container_name: haproxy-oauth-rnd
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "4186:80"
+    networks:
+      - oauth-net
+    depends_on:
+      - oauth2-proxy-haproxy
+    restart: unless-stopped
+
+  # Отдельный инстанс oauth2-proxy как "auth-only" backend для HAProxy.
+  # Порт наружу не публикуется — доступен только внутри oauth-net.
+  oauth2-proxy-haproxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    container_name: oauth2-proxy-haproxy
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=http://keycloak:8080/realms/corp-sso
+      - --client-id=haproxy-client
+      - --client-secret=haproxy-secret-CHANGEME
+      - --redirect-url=http://localhost:4186/oauth2/callback
+      - --upstream=static://202
+      - --email-domain=*
+      - --cookie-secret=z-ixG6CrxCsgj3cGZIXbXMDAn98rIcnJm1SJOXAUV-A=
+      - --cookie-secure=false
+      - --set-xauthrequest=true
+      - --skip-provider-button=true
+      - --insecure-oidc-allow-unverified-email=true
+      - --silence-ping-logging=true
+    networks:
+      - oauth-net
+    restart: unless-stopped

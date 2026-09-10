@@ -1,0 +1,23 @@
+# OpenResty + lua-resty-openidc: нативная OIDC-аутентификация прямо в Nginx,
+# без отдельного auth-сервиса (в отличие от связки nginx auth_request + oauth2-proxy).
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/nginx-openresty/docker-compose.yml up -d --build
+#
+# Проверка: http://localhost:4185/ -> редирект на Keycloak login ->
+#   testuser / Test12345! -> редирект обратно на /redirect_uri -> Hello World.
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  nginx-openresty:
+    build: .
+    container_name: nginx-openresty
+    ports:
+      - "4185:80"
+    networks:
+      - oauth-net
+    restart: unless-stopped

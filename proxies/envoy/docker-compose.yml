@@ -1,0 +1,29 @@
+# Envoy с нативным OAuth2-фильтром перед nginx-hello.
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/envoy/docker-compose.yml up -d
+#
+# Проверка: curl -v http://localhost:4183/ -> 302 на Keycloak authorize endpoint.
+# Admin-интерфейс Envoy (stats/config_dump) на http://localhost:9901 — только для RND,
+# в проде admin listener не публикуется наружу.
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.34-latest
+    container_name: envoy
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./token-secret.yaml:/etc/envoy/token-secret.yaml:ro
+      - ./hmac-secret.yaml:/etc/envoy/hmac-secret.yaml:ro
+    command: ["-c", "/etc/envoy/envoy.yaml"]
+    ports:
+      - "4183:10000"
+      - "9901:9901"
+    networks:
+      - oauth-net
+    restart: unless-stopped

@@ -1,0 +1,39 @@
+# oauth2-proxy перед nginx-hello, аутентификация через Keycloak (realm corp-sso).
+#
+# Запуск (после базового docker compose up -d в корне проекта):
+#   docker compose -f proxies/oauth2-proxy/docker-compose.yml up -d
+#
+# Проверка: http://localhost:4180/  -> редирект на Keycloak login ->
+#   testuser / Test12345! -> редирект обратно, виден Hello World.
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    container_name: oauth2-proxy
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=http://keycloak:8080/realms/corp-sso
+      - --client-id=oauth2-proxy-client
+      - --client-secret=oauth2-proxy-secret-CHANGEME
+      - --redirect-url=http://localhost:4180/oauth2/callback
+      - --upstream=http://nginx-hello:80
+      - --email-domain=*
+      - --cookie-secret=RByFjMUP9n_kT3sjVx7TK9dYrkwxY8vzRWYYOP4O_O4=
+      - --cookie-secure=false
+      - --pass-access-token=true
+      - --pass-authorization-header=true
+      - --set-xauthrequest=true
+      - --skip-provider-button=true
+      - --insecure-oidc-allow-unverified-email=true
+      - --silence-ping-logging=true
+    ports:
+      - "4180:4180"
+    networks:
+      - oauth-net
+    restart: unless-stopped

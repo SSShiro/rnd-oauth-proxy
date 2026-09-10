@@ -1,0 +1,33 @@
+# Конфигурация gogatekeeper (community-продолжение Keycloak Gatekeeper / Louketo Proxy).
+# Один инстанс = один upstream (в отличие от oauth2-proxy, который тоже
+# в целом "один upstream", но gogatekeeper дополнительно умеет
+# path-based role/claim matching через "resources" из коробки).
+
+discovery-url: http://keycloak:8080/realms/corp-sso
+client-id: gogatekeeper-client
+client-secret: gogatekeeper-secret-CHANGEME
+
+listen: 0.0.0.0:4181
+upstream-url: http://nginx-hello:80
+
+# redirection-url — базовый URL, gatekeeper сам добавляет путь /oauth/callback,
+# итоговый redirect_uri должен совпадать с тем, что прописан в Keycloak-клиенте.
+redirection-url: http://localhost:4181
+
+encryption-key: "0oiHIMu8PMtAXQN1t5zQ4Auu1npRURgp"
+secure-cookie: false
+# По умолчанию enable-default-deny: true конфликтует с собственным
+# catch-all правилом "/*" ниже — отключаем, т.к. правило уже задаёт deny-by-default семантику.
+enable-default-deny: false
+enable-refresh-tokens: true
+enable-idp-session-check: false
+enable-logging: true
+verbose: true
+
+# RBAC на уровне путей: пускаем только пользователей с ролью app-user.
+# Для сравнения с oauth2-proxy/vouch-proxy — у них такой гранулярности
+# из коробки нет, только allowed-groups/allowed-emails.
+resources:
+  - uri: /*
+    roles:
+      - app-user

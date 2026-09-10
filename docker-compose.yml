@@ -1,0 +1,57 @@
+# Базовый тестовый стенд: Keycloak (корпоративный SSO) + "Hello World" backend
+# на nginx, который сам по себе OpenID Connect не поддерживает.
+#
+# Сеть oauth-net используется всеми docker-compose из proxies/*, чтобы
+# каждое OAuth-proxy решение могло достучаться до Keycloak и до backend.
+#
+# Запуск:
+#   docker compose up -d
+#   Keycloak admin console: http://localhost:8080/admin  (admin / admin12345)
+#   Realm "corp-sso" импортируется автоматически из keycloak/import/realm-export.json
+#
+# Затем поднимайте нужное решение из proxies/<name>/docker-compose.yml —
+# оно подключится к этой же сети oauth-net.
+
+networks:
+  oauth-net:
+    name: oauth-net
+    driver: bridge
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: keycloak
+    command: ["start-dev", "--import-realm", "--http-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin12345
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: "xforwarded"
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - oauth-net
+    healthcheck:
+      # curl/wget нет в образе Keycloak — используем sh + /dev/tcp на management-порт 9000.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  nginx-hello:
+    image: nginx:1.27-alpine
+    container_name: nginx-hello
+    volumes:
+      - ./nginx-hello/html:/usr/share/nginx/html:ro
+      - ./nginx-hello/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - oauth-net
+    # Порт наружу намеренно НЕ публикуется: приложение доступно только
+    # через один из oauth-proxy решений в proxies/*, как и было бы в проде.
+    restart: unless-stopped
