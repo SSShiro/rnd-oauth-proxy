@@ -16,12 +16,28 @@
 #   ./scripts/test-oidc-login.sh http://localhost:4181/ testuser 'Test12345!'
 #   ./scripts/test-oidc-login.sh https://hello.localhost:4187/ testuser 'Test12345!' -k
 #
+# Переменные окружения (опционально):
+#   EXPECT_TEXT — строка, которую ищем в финальном ответе как признак успеха
+#                 (по умолчанию "Hello World" — контент nginx-hello из основного
+#                 стенда). Для RBAC-сценария (rbac-scenario/) используйте,
+#                 например, EXPECT_TEXT="область Team2_Users".
+#   JAR_OUT      — если задан, cookie jar после успешного логина копируется
+#                  туда и НЕ удаляется по завершении скрипта (по умолчанию
+#                  jar временный и удаляется) — удобно, чтобы потом вручную
+#                  curl'ить другие пути (например /admin) той же сессией:
+#                    JAR_OUT=/tmp/team2user.jar ./scripts/test-oidc-login.sh \
+#                      http://service2.localhost:5181/ team2user 'Team2User12345!'
+#                    curl -b /tmp/team2user.jar http://service2.localhost:5181/admin
+#
 # Требования: curl, python3 (только для html.unescape, без внешних зависимостей).
 # Перед первым запуском один раз добавьте в /etc/hosts: 127.0.0.1 keycloak
 # (нужно почти всем сценариям — Keycloak должен резолвиться с хоста так же,
 # как внутри docker-сети oauth-net).
 
 set -euo pipefail
+
+EXPECT_TEXT="${EXPECT_TEXT:-Hello World}"
+JAR_OUT="${JAR_OUT:-}"
 
 URL="${1:?Usage: $0 <url> [username] [password] [extra curl opts...]}"
 USERNAME="${2:-testuser}"
@@ -71,20 +87,26 @@ echo "--- Статусы ---"
 grep -E "^HTTP" "$HEADERS2"
 
 echo
-echo "==> [3/3] Проверка результата"
-if grep -q "Hello World" "$RESULT"; then
-  echo "УСПЕХ: получен контент защищённого приложения nginx-hello."
+echo "==> [3/3] Проверка результата (ищем: \"$EXPECT_TEXT\")"
+if grep -q -- "$EXPECT_TEXT" "$RESULT"; then
+  echo "УСПЕХ: ожидаемый контент найден в ответе."
   echo
   echo "--- Заголовки финального ответа (для проверки identity/claims) ---"
   curl -sS "${EXTRA_CURL_OPTS[@]}" -b "$JAR" -D - -o /dev/null "$URL" | grep -Ei "^HTTP|^x-"
-  echo
-  echo "Cookie jar сохранён во временном каталоге на время работы скрипта;"
-  echo "для повторных ручных запросов с этой же сессией используйте:"
-  echo "  curl -b \"$JAR\" ${EXTRA_CURL_OPTS[*]:-} \"$URL\"   # (файл будет удалён после завершения скрипта)"
+  if [ -n "$JAR_OUT" ]; then
+    cp "$JAR" "$JAR_OUT"
+    echo
+    echo "Cookie jar сохранён в $JAR_OUT (не будет удалён) — используйте для"
+    echo "дальнейших запросов той же сессией: curl -b \"$JAR_OUT\" ${EXTRA_CURL_OPTS[*]:-} <URL>"
+  fi
   exit 0
 else
-  echo "ОШИБКА: 'Hello World' не найден в финальном ответе."
+  echo "ОШИБКА: \"$EXPECT_TEXT\" не найден в финальном ответе."
   echo "--- Тело ответа (может быть страницей ошибки Keycloak/прокси) ---"
   cat "$RESULT"
+  if [ -n "$JAR_OUT" ]; then
+    cp "$JAR" "$JAR_OUT"
+    echo "(Cookie jar всё равно сохранён в $JAR_OUT для отладки.)"
+  fi
   exit 1
 fi

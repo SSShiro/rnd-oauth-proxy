@@ -1,0 +1,41 @@
+# RBAC-сценарий: vouch-proxy сам НЕ умеет ролевой авторизации — он только
+# аутентифицирует (allowAllUsers: true) и, благодаря headers.claims, кладёт
+# claim "roles" в заголовок ответа /validate. Собственно RBAC (разный доступ
+# на "/" и "/admin") реализован в front-nginx рядом (nginx.conf), который
+# читает этот заголовок и сам решает — пускать или нет.
+vouch:
+  listen: 0.0.0.0
+  port: 9090
+  allowAllUsers: true
+  cookie:
+    secure: false
+    # ВАЖНАЯ НАХОДКА: domain: localhost (широкий, "родительский" домен)
+    # curl/браузеры ОТКЛОНЯЮТ как cookie для потенциального public suffix
+    # (защита от "cookie tossing" между произвольными *.localhost) — cookie
+    # молча НЕ сохраняется клиентом, из-за чего возникает бесконечный
+    # редирект-луп (сервер каждый раз считает пользователя неаутентифицированным).
+    # Подтверждено эмпирически: curl -c jar.txt показывал в jar только
+    # cookie Keycloak, VouchCookie отсутствовал. Фикс — точный домен,
+    # совпадающий с фактическим hostname (без "расширения" на поддомены).
+    domain: service2.localhost
+  jwt:
+    secret: "1oEz4WdFaKUl+abasdJNzAtostAlFzdNUlWPapg4MyU="
+  headers:
+    claims:
+      - roles
+
+oauth:
+  provider: oidc
+  client_id: vouch-proxy-rbac-client
+  client_secret: vouch-proxy-rbac-secret-CHANGEME
+  # Единый hostname keycloak:8080 для auth_url/token_url/user_info_url —
+  # иначе рассинхронизация claim "iss" (найдено и задокументировано в
+  # основном RND, proxies/vouch-proxy/config.yml).
+  auth_url: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/auth
+  token_url: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/token
+  user_info_url: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/userinfo
+  scopes:
+    - openid
+    - email
+    - profile
+  callback_url: http://service2.localhost:5185/auth

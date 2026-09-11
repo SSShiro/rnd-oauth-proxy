@@ -1,0 +1,53 @@
+# Pomerium — path-based RBAC на ОДНОМ домене service2.localhost:
+#   /       -> требуется роль Team2_Users
+#   /admin  -> требуется роль Team2_Admins
+#
+# Два route с одинаковым "from" и разным "prefix" — Pomerium сам матчит
+# наиболее специфичный route (по длине совпавшего prefix), без ручной
+# сортировки списка routes (в отличие, например, от gogatekeeper, где
+# порядок "resources" критичен). Подтверждено тестами в README.md.
+#
+# TLS обязателен даже локально: Pomerium жёстко ставит флаг Secure на
+# CSRF/PKCE cookie в коде (authenticate/csrf.go), конфигурационного
+# override нет — см. также proxies/pomerium/config.yaml в основном стенде.
+
+address: ":5182"
+certificate_file: /pomerium/certs/tls.crt
+certificate_key_file: /pomerium/certs/tls.key
+
+authenticate_service_url: https://authenticate.service2.localhost:5182
+
+shared_secret: "41tXd3IykoeCy8CEsjm1pfe3ACiyc+BVco9WiYpmJPQ="
+cookie_secret: "8QEEm8fgP8UiWMIMUr1yF29eggKyEi74bxTJWU6cIt0="
+
+databroker_storage_type: file
+databroker_storage_connection_string: file:///pomerium/data/databroker
+
+idp_provider: oidc
+idp_provider_url: http://keycloak:8080/realms/corp-sso
+idp_client_id: pomerium-rbac-client
+idp_client_secret: pomerium-rbac-secret-CHANGEME
+idp_scopes:
+  - openid
+  - email
+  - profile
+
+routes:
+  # Более специфичный route (prefix /admin) — роль Team2_Admins.
+  - from: https://service2.localhost:5182
+    prefix: /admin
+    to: http://service2-backend:80
+    pass_identity_headers: true
+    policy:
+      - allow:
+          and:
+            - claim/roles: Team2_Admins
+
+  # Общий route (весь остальной путь) — роль Team2_Users.
+  - from: https://service2.localhost:5182
+    to: http://service2-backend:80
+    pass_identity_headers: true
+    policy:
+      - allow:
+          and:
+            - claim/roles: Team2_Users

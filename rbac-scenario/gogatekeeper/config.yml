@@ -1,0 +1,48 @@
+# RBAC-сценарий: один инстанс gogatekeeper перед service2-backend,
+# с двумя уровнями ролей на одном домене — / требует Team2_Users,
+# /admin требует Team2_Admins. В отличие от базового стенда
+# (proxies/gogatekeeper/), здесь используются ДВА правила "resources".
+
+discovery-url: http://keycloak:8080/realms/corp-sso
+client-id: gogatekeeper-rbac-client
+client-secret: gogatekeeper-rbac-secret-CHANGEME
+
+listen: 0.0.0.0:5181
+upstream-url: http://service2-backend:80
+
+redirection-url: http://service2.localhost:5181
+
+encryption-key: "ZD28bZsid2tk8mbrNJE6qQoX9lmCC2Bh"
+secure-cookie: false
+enable-default-deny: false
+enable-refresh-tokens: true
+enable-idp-session-check: false
+enable-logging: true
+verbose: true
+
+# Порядок ниже (специфичные /admin, /admin/* перед catch-all /*) — намеренная
+# defensive-практика. ЭМПИРИЧЕСКИ ПРОВЕРЕНО (см. README.md, раздел 3), что в
+# gogatekeeper 4.11.0 порядок объявления resources НА САМОМ ДЕЛЕ НЕ ВЛИЯЕТ на
+# итог: под капотом используется go-chi/chi (радиксное дерево маршрутов),
+# который сам выбирает наиболее специфичный зарегистрированный маршрут для
+# пути запроса независимо от порядка в YAML. Тем не менее специфичное-перед-
+# общим остаётся правильной практикой (человекочитаемость, переносимость на
+# другие реализации resources-матчинга, которые МОГУТ быть строго
+# порядковыми) — подробности и живой эксперимент см. в README.md.
+#
+# ВАЖНО (эмпирически подтверждено, это НЕ зависит от порядка): паттерн
+# "/admin/*" НЕ матчит литеральный путь "/admin" без завершающего слэша —
+# такой запрос проваливается в catch-all "/*" и требует только Team2_Users,
+# а не Team2_Admins! Проверено: без отдельного правила "/admin" пользователь
+# team2user (без роли Team2_Admins) получал 200 на GET /admin. Поэтому нужно
+# отдельное правило именно на "/admin" (без звёздочки).
+resources:
+  - uri: /admin
+    roles:
+      - Team2_Admins
+  - uri: /admin/*
+    roles:
+      - Team2_Admins
+  - uri: /*
+    roles:
+      - Team2_Users

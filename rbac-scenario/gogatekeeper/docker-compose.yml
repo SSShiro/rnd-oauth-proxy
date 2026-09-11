@@ -1,0 +1,29 @@
+# RBAC-сценарий: gogatekeeper перед service2-backend с path-based ролями.
+#
+# Запуск (после базового стенда docker compose up -d в корне и
+# rbac-scenario/docker-compose.yml up -d):
+#   docker compose -f rbac-scenario/gogatekeeper/docker-compose.yml up -d
+#
+# Проверка:
+#   http://service2.localhost:5181/       -> требует роль Team2_Users
+#   http://service2.localhost:5181/admin  -> требует роль Team2_Admins
+
+name: rbac-gogatekeeper
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  gogatekeeper-rbac:
+    image: quay.io/gogatekeeper/gatekeeper:4.11.0
+    container_name: gogatekeeper-rbac
+    command: ["--config=/etc/gatekeeper/config.yml"]
+    volumes:
+      - ./config.yml:/etc/gatekeeper/config.yml:ro
+    ports:
+      - "5181:5181"
+    networks:
+      - oauth-net
+    restart: unless-stopped

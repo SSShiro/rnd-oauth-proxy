@@ -1,0 +1,32 @@
+# Pomerium — path-based RBAC сценарий (service2 / service2/admin), порт 5182 (HTTPS).
+#
+# Запуск (после базового docker compose up -d и rbac-scenario/docker-compose.yml
+# из корня проекта — нужны Keycloak, oauth-net, service2-backend):
+#   docker compose -f rbac-scenario/pomerium/docker-compose.yml up -d
+#
+# Проверка: https://service2.localhost:5182/ (curl -k / браузер с игнорированием
+#   предупреждения о самоподписанном сертификате).
+
+name: rbac-pomerium
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  pomerium-rbac:
+    image: pomerium/pomerium:v0.33.3
+    container_name: pomerium-rbac
+    volumes:
+      - ./config.yaml:/pomerium/config.yaml:ro
+      - ./certs:/pomerium/certs:ro
+      - pomerium-rbac-data:/pomerium/data
+    ports:
+      - "5182:5182"
+    networks:
+      - oauth-net
+    restart: unless-stopped
+
+volumes:
+  pomerium-rbac-data:

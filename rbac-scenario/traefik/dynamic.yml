@@ -1,0 +1,75 @@
+# Path-based RBAC поверх Traefik OSS: у Traefik нет нативного RBAC/OIDC,
+# поэтому используются ДВА независимых инстанса oauth2-proxy (каждый со
+# своим --allowed-group), и Traefik маршрутизирует запрос к НУЖНОМУ из них
+# в зависимости от пути через два разных router+middleware.
+#
+# forwardAuth обязан идти на КОРЕНЬ oauth2-proxy ("/"), НЕ на /oauth2/auth —
+# тот endpoint всегда отдаёт голый 401 без Location (для nginx auth_request),
+# а нам нужен полноценный 302 на Keycloak при отсутствии сессии. Каждый
+# oauth2-proxy запущен с --upstream=static://202: при валидной сессии с
+# нужной ролью отдаёт 202 (Traefik пропускает и сам проксирует на backend),
+# без сессии/роли — 401 или 302, которые Traefik ретранслирует как есть.
+http:
+  routers:
+    admin-route:
+      rule: "PathPrefix(`/admin`)"
+      entryPoints: ["web"]
+      priority: 100
+      middlewares: ["oauth2-admin-auth"]
+      service: service2-backend
+
+    root-route:
+      rule: "PathPrefix(`/`)"
+      entryPoints: ["web"]
+      priority: 1
+      middlewares: ["oauth2-users-auth"]
+      service: service2-backend
+
+    oauth2-users-callback:
+      rule: "PathPrefix(`/oauth2-users/`)"
+      entryPoints: ["web"]
+      priority: 200
+      service: oauth2-proxy-rbac-traefik-users
+
+    oauth2-admins-callback:
+      rule: "PathPrefix(`/oauth2-admins/`)"
+      entryPoints: ["web"]
+      priority: 200
+      service: oauth2-proxy-rbac-traefik-admins
+
+  middlewares:
+    oauth2-users-auth:
+      forwardAuth:
+        address: "http://oauth2-proxy-rbac-traefik-users:4180/"
+        trustForwardHeader: true
+        authResponseHeaders:
+          - "X-Auth-Request-User"
+          - "X-Auth-Request-Email"
+          - "X-Auth-Request-Preferred-Username"
+          - "X-Auth-Request-Groups"
+
+    oauth2-admin-auth:
+      forwardAuth:
+        address: "http://oauth2-proxy-rbac-traefik-admins:4180/"
+        trustForwardHeader: true
+        authResponseHeaders:
+          - "X-Auth-Request-User"
+          - "X-Auth-Request-Email"
+          - "X-Auth-Request-Preferred-Username"
+          - "X-Auth-Request-Groups"
+
+  services:
+    service2-backend:
+      loadBalancer:
+        servers:
+          - url: "http://service2-backend:80"
+
+    oauth2-proxy-rbac-traefik-users:
+      loadBalancer:
+        servers:
+          - url: "http://oauth2-proxy-rbac-traefik-users:4180"
+
+    oauth2-proxy-rbac-traefik-admins:
+      loadBalancer:
+        servers:
+          - url: "http://oauth2-proxy-rbac-traefik-admins:4180"

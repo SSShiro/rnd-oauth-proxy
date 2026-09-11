@@ -1,0 +1,25 @@
+# OpenResty + lua-resty-openidc, path-based RBAC на одном хосте service2.localhost:
+#   /       -> требуется роль Team2_Users
+#   /admin  -> требуется роль Team2_Admins
+#
+# Запуск (после базового стенда и rbac-scenario/docker-compose.yml):
+#   docker compose -f rbac-scenario/nginx-openresty/docker-compose.yml up -d --build
+#
+# Проверка: http://service2.localhost:5188/ и /admin — см. README.md рядом.
+
+name: rbac-nginx-openresty
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  nginx-openresty-rbac:
+    build: .
+    container_name: nginx-openresty-rbac
+    ports:
+      - "5188:80"
+    networks:
+      - oauth-net
+    restart: unless-stopped

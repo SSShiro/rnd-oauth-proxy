@@ -1,0 +1,11 @@
+# Standalone-режим APISIX (без etcd): маршруты читаются из apisix.yaml,
+# который APISIX перечитывает раз в секунду при изменении файла.
+apisix:
+  node_listen:
+    - port: 9080
+  enable_admin: false
+
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml

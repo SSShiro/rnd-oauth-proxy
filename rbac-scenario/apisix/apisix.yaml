@@ -1,0 +1,103 @@
+# RBAC-сценарий: service2 (роль Team2_Users) + service2/admin (роль Team2_Admins).
+# Standalone-режим (без etcd), как в основном стенде proxies/apisix/.
+#
+# У плагина openid-connect нет встроенного "требовать роль X" — используем
+# serverless-pre-function ПОСЛЕ него в конвейере, читающий заголовок
+# X-Userinfo (base64 JSON), который openid-connect кладёт в запрос к upstream
+# при set_userinfo_header: true. КРИТИЧНО: serverless-pre-function по
+# умолчанию имеет priority 10000 (выполнится РАНЬШЕ openid-connect, у
+# которого priority ~2599) — поэтому здесь явно понижаем его priority через
+# _meta.priority до значения МЕНЬШЕ 2599, чтобы гарантировать порядок
+# "сначала аутентификация, потом проверка роли".
+routes:
+  - id: service2-admin
+    # ВАЖНО: "/admin/*" НЕ матчит голый "/admin" (без слэша) — нужно
+    # перечислить оба варианта явно, иначе запрос без слэша провалится
+    # в route "service2-root" с проверкой на Team2_Users вместо Team2_Admins.
+    uris:
+      - /admin
+      - /admin/*
+    priority: 10       # более специфичный маршрут — выше приоритет матчинга, чем у /*
+    upstream_id: service2-backend
+    plugins:
+      openid-connect: &oidc-config
+        client_id: apisix-rbac-client
+        client_secret: apisix-rbac-secret-CHANGEME
+        discovery: http://keycloak:8080/realms/corp-sso/.well-known/openid-configuration
+        redirect_uri: http://service2.localhost:5183/callback
+        scope: openid email profile
+        ssl_verify: false
+        set_userinfo_header: true
+        session:
+          secret: apisix-rbac-session-secret-min16chars-CHANGEME
+      serverless-pre-function:
+        phase: access
+        _meta:
+          priority: 2000   # ниже, чем у openid-connect (~2599) -> выполняется ПОСЛЕ него
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              local required_role = "Team2_Admins"
+              local headers = ngx.req.get_headers()
+              local userinfo_b64 = headers["X-Userinfo"]
+              if not userinfo_b64 then
+                core.log.error("rbac-check: X-Userinfo header missing, denying")
+                return core.response.exit(403, {message = "Forbidden: no identity"})
+              end
+              local cjson = require("cjson.safe")
+              local raw = ngx.decode_base64(userinfo_b64)
+              local userinfo = raw and cjson.decode(raw)
+              local roles = (userinfo and userinfo.roles) or {}
+              local has_role = false
+              for _, r in ipairs(roles) do
+                if r == required_role then has_role = true end
+              end
+              if not has_role then
+                core.log.warn("rbac-check: user lacks role ", required_role)
+                return core.response.exit(403, {message = "Forbidden: missing role " .. required_role})
+              end
+            end
+
+  - id: service2-root
+    uri: /*
+    priority: 1
+    upstream_id: service2-backend
+    plugins:
+      openid-connect: *oidc-config
+      serverless-pre-function:
+        phase: access
+        _meta:
+          priority: 2000
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              local required_role = "Team2_Users"
+              local headers = ngx.req.get_headers()
+              local userinfo_b64 = headers["X-Userinfo"]
+              if not userinfo_b64 then
+                core.log.error("rbac-check: X-Userinfo header missing, denying")
+                return core.response.exit(403, {message = "Forbidden: no identity"})
+              end
+              local cjson = require("cjson.safe")
+              local raw = ngx.decode_base64(userinfo_b64)
+              local userinfo = raw and cjson.decode(raw)
+              local roles = (userinfo and userinfo.roles) or {}
+              local has_role = false
+              for _, r in ipairs(roles) do
+                if r == required_role then has_role = true end
+              end
+              if not has_role then
+                core.log.warn("rbac-check: user lacks role ", required_role)
+                return core.response.exit(403, {message = "Forbidden: missing role " .. required_role})
+              end
+            end
+
+upstreams:
+  - id: service2-backend
+    type: roundrobin
+    nodes:
+      "service2-backend:80": 1
+
+#END
