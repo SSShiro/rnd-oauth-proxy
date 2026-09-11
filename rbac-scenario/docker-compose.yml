@@ -1,0 +1,23 @@
+# Общий backend RBAC-сценария. Запускается ПОСЛЕ базового стенда
+# (docker compose up -d в корне — нужны Keycloak и сеть oauth-net):
+#   docker compose -f rbac-scenario/docker-compose.yml up -d
+#
+# Дальше поднимайте любую из 9 реализаций в rbac-scenario/<proxy>/.
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  service2-backend:
+    image: nginx:1.27-alpine
+    container_name: service2-backend
+    volumes:
+      - ./service2-backend/html:/usr/share/nginx/html:ro
+      - ./service2-backend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - oauth-net
+    # Порт наружу не публикуется — доступ только через прокси перед ним,
+    # как и nginx-hello в основном стенде.
+    restart: unless-stopped

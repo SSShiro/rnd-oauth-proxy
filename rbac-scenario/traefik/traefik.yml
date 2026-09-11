@@ -1,0 +1,18 @@
+# Статическая конфигурация Traefik (RBAC-сценарий).
+entryPoints:
+  web:
+    address: ":80"
+
+api:
+  dashboard: true
+  insecure: true   # только для RND-стенда
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+log:
+  level: INFO
+
+accessLog: {}

@@ -1,0 +1,61 @@
+# RBAC-сценарий: path-based авторизация service2/service2-admin на HAProxy.
+#
+# Архитектура: ОДИН oauth2-proxy как "auth-only" backend (без --allowed-group —
+# он только аутентифицирует и прокидывает роли в заголовке ответа), а сам
+# HAProxy через ACL решает, пускать ли на "/" (нужна роль Team2_Users) или
+# на "/admin" (нужна роль Team2_Admins). В отличие от основного стенда, где
+# HAProxy лишь пускает/не пускает по факту аутентификации, здесь HAProxy
+# сам берёт на себя финальное ролевое решение.
+#
+# Запуск (после базового стенда + rbac-scenario/docker-compose.yml):
+#   docker compose -f rbac-scenario/haproxy/docker-compose.yml up -d --build
+#
+# ВАЖНО: явное имя проекта ниже (name:) обязательно — без него Compose
+# выводит имя проекта из имени директории ("haproxy"), которое совпадает
+# с proxies/haproxy/ из основного стенда, и оба стека начинают видеть
+# контейнеры друг друга как "orphans" одного и того же проекта.
+name: rbac-haproxy
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  haproxy-rbac:
+    build: .
+    container_name: haproxy-rbac
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "5189:80"
+    networks:
+      - oauth-net
+    depends_on:
+      - oauth2-proxy-rbac-haproxy
+    restart: unless-stopped
+
+  # auth-only backend: аутентифицирует, но НЕ ограничивает по группе/роли —
+  # финальное ролевое решение принимает HAProxy (см. haproxy.cfg).
+  oauth2-proxy-rbac-haproxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    container_name: oauth2-proxy-rbac-haproxy
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=http://keycloak:8080/realms/corp-sso
+      - --client-id=haproxy-rbac-client
+      - --client-secret=haproxy-rbac-secret-CHANGEME
+      - --redirect-url=http://service2.localhost:5189/oauth2/callback
+      - --upstream=static://202
+      - --oidc-groups-claim=roles
+      - --email-domain=*
+      - --cookie-secret=mswvPs6Kk0LgSVLR3-db5tJjvizrboZOhOmBpWj16tk=
+      - --cookie-secure=false
+      - --set-xauthrequest=true
+      - --skip-provider-button=true
+      - --insecure-oidc-allow-unverified-email=true
+      - --silence-ping-logging=true
+    networks:
+      - oauth-net
+    restart: unless-stopped

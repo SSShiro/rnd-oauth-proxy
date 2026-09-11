@@ -1,0 +1,192 @@
+# RBAC-сценарий на нативном Envoy: цепочка из трёх HTTP-фильтров.
+#
+#   envoy.filters.http.oauth2   — аутентификация (как в основном стенде),
+#                                 forward_bearer_token: true пробрасывает
+#                                 access_token дальше как Authorization: Bearer.
+#   envoy.filters.http.jwt_authn — повторно валидирует тот же JWT через JWKS
+#                                 Keycloak и кладёт payload (включая claim
+#                                 "roles") в dynamic metadata по ключу jwt_payload.
+#   envoy.filters.http.rbac      — на уровне КАЖДОГО route (typed_per_filter_config)
+#                                 сравнивает metadata из jwt_authn с требуемой
+#                                 ролью для этого route.
+#
+# У oauth2-фильтра своего RBAC нет — весь смысл этой конфигурации в связке
+# трёх фильтров. Верхнеуровневый rbac-фильтр (в http_filters) специально
+# оставлен "запрещающим всё по умолчанию" (пустые policies при action ALLOW),
+# т.к. реальные policy заданы per-route ниже и полностью его переопределяют.
+#
+# TLS вместо insecure http: у envoy.filters.http.oauth2 cookie OauthNonce/
+# CodeVerifier (PKCE/CSRF-защита) всегда ставятся с флагом Secure, без
+# конфигурационного override — ровно та же история, что и у Pomerium в
+# основном RBAC-исследовании. Экспериментально подтверждено: curl отправляет
+# Secure-cookie по чистому HTTP только для буквального хоста "localhost"
+# (собственная лояльность curl, не связанная со спецификацией), но НЕ для
+# поддоменов вида "service2.localhost" — в реальном браузере оба случая
+# работали бы одинаково (secure-context исключение для *.localhost из
+# спецификации шире, чем то, что реализует curl). Самоподписанный
+# сертификат в certs/ — только для этого RND-теста.
+
+node:
+  id: envoy-rbac
+  cluster: envoy-rbac-cluster
+
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 10000 }
+    filter_chains:
+    - transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+            - certificate_chain: { filename: /etc/envoy/certs/tls.crt }
+              private_key: { filename: /etc/envoy/certs/tls.key }
+      filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: service2
+              domains: ["*"]
+              routes:
+              # /admin — более специфичный prefix, ОБЯЗАН идти раньше "/",
+              # иначе catch-all route ниже перехватит его первым.
+              - match: { prefix: "/admin" }
+                route: { cluster: service2_backend }
+                typed_per_filter_config:
+                  envoy.filters.http.rbac:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBACPerRoute
+                    rbac:
+                      rules:
+                        action: ALLOW
+                        policies:
+                          "admins-only":
+                            permissions:
+                              - any: true
+                            principals:
+                              - metadata:
+                                  filter: envoy.filters.http.jwt_authn
+                                  path:
+                                    - key: jwt_payload
+                                    - key: roles
+                                  value:
+                                    list_match:
+                                      one_of:
+                                        string_match:
+                                          exact: "Team2_Admins"
+              - match: { prefix: "/" }
+                route: { cluster: service2_backend }
+                typed_per_filter_config:
+                  envoy.filters.http.rbac:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBACPerRoute
+                    rbac:
+                      rules:
+                        action: ALLOW
+                        policies:
+                          "users-only":
+                            permissions:
+                              - any: true
+                            principals:
+                              - metadata:
+                                  filter: envoy.filters.http.jwt_authn
+                                  path:
+                                    - key: jwt_payload
+                                    - key: roles
+                                  value:
+                                    list_match:
+                                      one_of:
+                                        string_match:
+                                          exact: "Team2_Users"
+          http_filters:
+          - name: envoy.filters.http.oauth2
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+              config:
+                token_endpoint:
+                  cluster: keycloak
+                  uri: http://keycloak:8080/realms/corp-sso/protocol/openid-connect/token
+                  timeout: 5s
+                authorization_endpoint: "http://keycloak:8080/realms/corp-sso/protocol/openid-connect/auth"
+                redirect_uri: "https://service2.localhost:5186/callback"
+                redirect_path_matcher:
+                  path: { exact: /callback }
+                signout_path:
+                  path: { exact: /signout }
+                credentials:
+                  client_id: envoy-rbac-client
+                  token_secret:
+                    name: token
+                    sds_config:
+                      resource_api_version: V3
+                      path_config_source: { path: /etc/envoy/token-secret.yaml }
+                  hmac_secret:
+                    name: hmac
+                    sds_config:
+                      resource_api_version: V3
+                      path_config_source: { path: /etc/envoy/hmac-secret.yaml }
+                auth_scopes: ["openid", "email", "profile"]
+                forward_bearer_token: true
+                cookie_configs:
+                  bearer_token_cookie_config: { same_site: LAX }
+                  oauth_hmac_cookie_config: { same_site: LAX }
+                  oauth_expires_cookie_config: { same_site: LAX }
+          - name: envoy.filters.http.jwt_authn
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+              providers:
+                keycloak:
+                  issuer: "http://keycloak:8080/realms/corp-sso"
+                  # Проверяем именно то, что сам же forward_bearer_token положил
+                  # в Authorization: Bearer <access_token> — extraction по
+                  # умолчанию берёт токен из заголовка Authorization.
+                  remote_jwks:
+                    http_uri:
+                      uri: "http://keycloak:8080/realms/corp-sso/protocol/openid-connect/certs"
+                      cluster: keycloak
+                      timeout: 5s
+                    cache_duration: { seconds: 300 }
+                  payload_in_metadata: "jwt_payload"
+                  # access_token Keycloak по умолчанию не содержит "aud" под
+                  # наш client_id (aud там служебный "account") — валидацию
+                  # audience отключаем, полагаемся на issuer+подпись JWKS.
+                  audiences: []
+              rules:
+              - match: { prefix: "/" }
+                requires:
+                  provider_name: "keycloak"
+          - name: envoy.filters.http.rbac
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+              rules:
+                action: ALLOW
+                policies: {}
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+  - name: keycloak
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: keycloak
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: keycloak, port_value: 8080 } } }
+  - name: service2_backend
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service2_backend
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: service2-backend, port_value: 80 } } }
+
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }

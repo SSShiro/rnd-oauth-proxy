@@ -1,0 +1,27 @@
+# RBAC-сценарий: Apache APISIX, path-based RBAC на одном домене
+# (service2 = Team2_Users, service2/admin = Team2_Admins).
+#
+# Запуск (после базового docker compose up -d в корне + rbac-scenario/docker-compose.yml):
+#   docker compose -f rbac-scenario/apisix/docker-compose.yml up -d
+#
+# Проверка: http://service2.localhost:5183/
+
+name: rbac-apisix
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  apisix-rbac:
+    image: apache/apisix:3.18.0-debian
+    container_name: apisix-rbac
+    volumes:
+      - ./config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    ports:
+      - "5183:9080"
+    networks:
+      - oauth-net
+    restart: unless-stopped

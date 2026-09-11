@@ -1,0 +1,90 @@
+# Path-based RBAC поверх Traefik OSS: два инстанса oauth2-proxy
+# (--allowed-group=Team2_Users / Team2_Admins) + Traefik роутит запрос
+# к нужному через разные PathPrefix-правила (см. dynamic.yml).
+#
+# Запуск (после базового стенда И rbac-scenario/docker-compose.yml):
+#   docker compose -f rbac-scenario/traefik/docker-compose.yml up -d
+#
+# Проверка:
+#   http://service2.localhost:5187/       -> team2user или team2admin -> 200
+#   http://service2.localhost:5187/admin  -> только team2admin -> 200
+
+# Явное имя проекта — иначе docker compose выведет его из имени каталога
+# ("traefik"), которое совпадает с proxies/traefik/ из основного стенда,
+# и может перепутать контейнеры между сценариями.
+name: rbac-traefik
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  traefik:
+    image: traefik:v3.7
+    container_name: traefik-rbac
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
+    ports:
+      - "5187:80"
+      - "5287:8080"   # dashboard, RND-only
+    networks:
+      - oauth-net
+    restart: unless-stopped
+
+  oauth2-proxy-rbac-traefik-users:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    container_name: oauth2-proxy-rbac-traefik-users
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=http://keycloak:8080/realms/corp-sso
+      - --client-id=traefik-rbac-users-client
+      - --client-secret=traefik-rbac-users-secret-CHANGEME
+      - --redirect-url=http://service2.localhost:5187/oauth2-users/callback
+      - --proxy-prefix=/oauth2-users
+      - --upstream=static://202
+      - --reverse-proxy=true
+      - --oidc-groups-claim=roles
+      - --scope=openid email profile
+      - --allowed-group=Team2_Users
+      - --email-domain=*
+      - --cookie-secret=vjySjYbDWkMhQm8WVpT_bKusAMLQ__UKx0ekV32Sl70=
+      - --cookie-secure=false
+      - --set-xauthrequest=true
+      - --pass-user-headers=true
+      - --skip-provider-button=true
+      - --insecure-oidc-allow-unverified-email=true
+      - --silence-ping-logging=true
+    networks:
+      - oauth-net
+    restart: unless-stopped
+
+  oauth2-proxy-rbac-traefik-admins:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+    container_name: oauth2-proxy-rbac-traefik-admins
+    command:
+      - --http-address=0.0.0.0:4180
+      - --provider=oidc
+      - --oidc-issuer-url=http://keycloak:8080/realms/corp-sso
+      - --client-id=traefik-rbac-admins-client
+      - --client-secret=traefik-rbac-admins-secret-CHANGEME
+      - --redirect-url=http://service2.localhost:5187/oauth2-admins/callback
+      - --proxy-prefix=/oauth2-admins
+      - --upstream=static://202
+      - --reverse-proxy=true
+      - --oidc-groups-claim=roles
+      - --scope=openid email profile
+      - --allowed-group=Team2_Admins
+      - --email-domain=*
+      - --cookie-secret=bcUKL6JG-Tc3nRuTfrKpL1vwz55MTIgywGlGMmge49U=
+      - --cookie-secure=false
+      - --set-xauthrequest=true
+      - --pass-user-headers=true
+      - --skip-provider-button=true
+      - --insecure-oidc-allow-unverified-email=true
+      - --silence-ping-logging=true
+    networks:
+      - oauth-net
+    restart: unless-stopped

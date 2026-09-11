@@ -1,0 +1,32 @@
+# RBAC-сценарий на Envoy: oauth2 + jwt_authn + rbac фильтры перед service2-backend.
+#
+# Запуск (после базового стенда и rbac-scenario/docker-compose.yml):
+#   docker compose -f rbac-scenario/envoy/docker-compose.yml up -d
+#
+# Проверка (обязательно HTTPS с -k, самоподписанный сертификат — см. envoy.yaml):
+#   curl -k https://service2.localhost:5186/ -> редирект на Keycloak login ->
+#   team2user/Team2User12345! -> "Team2_Users"; /admin для team2user -> 403;
+#   team2admin -> и / и /admin проходят.
+
+name: rbac-envoy
+
+networks:
+  oauth-net:
+    external: true
+    name: oauth-net
+
+services:
+  envoy-rbac:
+    image: envoyproxy/envoy:v1.34-latest
+    container_name: envoy-rbac
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./token-secret.yaml:/etc/envoy/token-secret.yaml:ro
+      - ./hmac-secret.yaml:/etc/envoy/hmac-secret.yaml:ro
+      - ./certs:/etc/envoy/certs:ro
+    ports:
+      - "5186:10000"
+      - "9902:9901"
+    networks:
+      - oauth-net
+    restart: unless-stopped
